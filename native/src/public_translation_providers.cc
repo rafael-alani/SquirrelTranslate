@@ -438,16 +438,20 @@ std::string FetchDeepL(const Request& request, const ProviderConfig& config) {
                                    ? "https://api-free.deepl.com/v2/translate"
                                    : config.endpoint;
   std::string response;
-  const std::string target = request.target == "zh-CN" ? "ZH" :
+  const std::string target = request.target == "zh-CN" ? "ZH-HANS" :
                              request.target == "zh-TW" ? "ZH-HANT" :
                              request.target == "en" ? "EN" : request.target;
-  const std::vector<std::string> arguments = {
+  std::vector<std::string> arguments = {
       kCurlPath, "-L", "--silent", "--show-error", "--max-time", "5",
       "--connect-timeout", "2", "-X", "POST", endpoint,
       "-H", "@-",
       "-H", "Content-Type: application/x-www-form-urlencoded",
       "--data-urlencode", "text=" + request.word,
       "--data-urlencode", "target_lang=" + target};
+  if (request.target == "zh-CN" || request.target == "zh-TW") {
+    arguments.push_back("--data-urlencode");
+    arguments.push_back("source_lang=EN");
+  }
   const std::string header = "Authorization: DeepL-Auth-Key " +
                              config.api_key + "\n";
   if (!RunCommand(arguments, &response, kOutputLimit, request, header)) return {};

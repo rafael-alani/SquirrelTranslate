@@ -7,6 +7,7 @@
 #include <rime_api_stdbool.h>
 #include <rime_api.h>
 #include "query_translation_service.h"
+#include "query_english_input.h"
 
 #include <dispatch/dispatch.h>
 #include <arpa/inet.h>
@@ -130,6 +131,7 @@ static NSString *QueryTranslationKey(NSString *target, NSString *word) {
 }
 
 static NSString *QueryTargetForCandidate(NSString *candidate) {
+  if (QueryEnglishText(query_text) != nil) return @"zh-CN";
   static NSCharacterSet *asciiLetters;
   static NSCharacterSet *englishCharacters;
   static NSCharacterSet *nonEnglishCharacters;
@@ -166,7 +168,10 @@ static void QueryTranslationDidFinish(uint64_t generation, const char *word,
   NSString *phoneticValue = phonetic && phonetic[0] ?
       [NSString stringWithUTF8String:phonetic] : nil;
   if (!wordValue.length || !targetValue.length || !result.length) return;
-  if (phoneticValue.length) [result appendFormat:@"  /%@/", phoneticValue];
+  if (phoneticValue.length) {
+    if ([targetValue hasPrefix:@"zh"]) [result appendFormat:@"  · %@", phoneticValue];
+    else [result appendFormat:@"  /%@/", phoneticValue];
+  }
   dispatch_async(dispatch_get_main_queue(), ^{
     if (!query_active || generation != query_utility_generation) return;
     if (!query_public_translations) {
@@ -3869,6 +3874,7 @@ static void ToggleQueryHelp(void) {
     query_panel_pinned_top_left = NSMakePoint(NSMinX(frame), NSMaxY(frame));
     query_panel_position_pinned = YES;
   }
+  AdvanceQueryGeneration();
   query_help_visible = !query_help_visible;
   query_help_selected = 0;
   ShowQueryContext();
@@ -3943,7 +3949,8 @@ static BOOL HandleQueryRepeatAction(unichar character, BOOL autorepeat) {
   if (autorepeat || (character != 'g' && character != 'b' &&
                      character != 'c' && character != 'p' &&
                      character != 'n') ||
-      IsKeywordInputMode() || query_help_visible || query_search_feedback ||
+      QueryEnglishEntry(query_text) || IsKeywordInputMode() ||
+      query_help_visible || query_search_feedback ||
       !query_panel.visible) {
     ResetQueryRepeatAction();
     return NO;
@@ -4105,6 +4112,7 @@ static NSArray<NSArray<NSString *> *> *QueryHelpEntries(void) {
   NSString *newsActionHelp = @"公开版不执行动作（触发按键会被吞掉）";
 #endif
   NSArray<NSArray<NSString *> *> *entries = @[
+    @[@"uen Hello", @"English → 中文 + pinyin (1 second pause)"],
     @[@"⌃T", @"开启或关闭候选翻译"],
     @[@"⌃P", @"朗读当前候选的译文"],
     @[@"⌃Y", @"上屏当前候选的译文"],
@@ -4320,8 +4328,16 @@ static void ShowQueryContext(void) {
   STQueryBridgeViewV4 *view = QueryView();
   query_api->free_context(&context);
 
-  BOOL utilityMode = QueryUtilityMode(candidates, comments, &input);
-  if (utilityMode) {
+  NSString *english = QueryEnglishText(query_text);
+  BOOL utilityMode = english == nil && QueryUtilityMode(candidates, comments, &input);
+  if (english != nil) {
+    [candidates removeAllObjects];
+    [comments removeAllObjects];
+    [candidates addObject:english.length ? english : @"English → 中文"];
+    [comments addObject:english.length ? @"" : @"Type English after uen "];
+    input = [@"u" stringByAppendingString:query_text];
+    highlighted = 0;
+  } else if (utilityMode) {
     NSString *keyword = ActiveUtilityKeyword();
     if (keyword) {
       const char *label = SquirrelQueryKeywordLabel(keyword.UTF8String);
@@ -4341,7 +4357,8 @@ static void ShowQueryContext(void) {
     input = LocalizedQueryText(query_search_feedback_title ?: @"设置结果");
     highlighted = 0;
   }
-  if (!query_help_visible && !query_search_feedback && query_text.length > 0) {
+  if (!query_help_visible && !query_search_feedback &&
+      (english == nil ? query_text.length > 0 : english.length > 0)) {
     // Utility result rows keep their values untouched. Translate only the
     // final keyword row through the dedicated local keyword path.
     NSUInteger firstTranslationIndex = utilityMode ?
@@ -4365,6 +4382,8 @@ static void ShowQueryContext(void) {
         continue;
       }
       if (hasTranslation) continue;
+      // Only the highlighted candidate can spend provider quota.
+      if (!utilityMode && index != (NSUInteger)MAX(0, highlighted)) continue;
       SquirrelQueryTranslationRequest(word.UTF8String, target.UTF8String,
           (uint64_t)query_utility_generation, QueryTranslationDidFinish, NULL);
     }
@@ -4501,6 +4520,8 @@ static void ShowQueryContext(void) {
 
 static BOOL ProcessQueryKey(int keycode) {
   if (!query_api || !query_session) return NO;
+  if (QueryEnglishText(query_text) != nil) return YES;
+  if (query_active) AdvanceQueryGeneration();
   BOOL handled = query_api->process_key(query_session, keycode, 0);
   ShowQueryContext();
   return handled;
@@ -4531,6 +4552,7 @@ static BOOL EnsureQuerySession(void) {
 }
 
 static BOOL SetQueryInput(NSString *input) {
+  if (QueryEnglishText(input) != nil) return YES;
   return query_api && RIME_PROVIDED(query_api, set_input) && query_session &&
       query_api->set_input(query_session, input.UTF8String);
 }
@@ -4547,6 +4569,10 @@ static BOOL FeedQueryInputByKeys(RimeSessionId session, NSString *input) {
 
 static BOOL RebuildQuerySession(void) {
   if (!query_api || !query_active) return NO;
+  if (QueryEnglishText(query_text) != nil) {
+    ShowQueryContext();
+    return YES;
+  }
   NSInteger selectedIndex = 0;
   RimeContext_stdbool previousContext = {0};
   RIME_STRUCT_INIT(RimeContext_stdbool, previousContext);
@@ -5022,7 +5048,7 @@ static CGEventRef QueryEventTap(CGEventTapProxy proxy, CGEventType type,
     });
     return NULL;
   }
-  NSInteger configuredPage = query_active ?
+  NSInteger configuredPage = query_active && !QueryEnglishEntry(query_text) ?
       QueryPagingDirectionForEvent(event, keycode, flags) : 0;
   if (configuredPage) {
     if (!query_paging_keyup_pending) query_paging_keyup_pending = [NSMutableIndexSet indexSet];
@@ -5074,7 +5100,8 @@ static CGEventRef QueryEventTap(CGEventTapProxy proxy, CGEventType type,
       (flags & (kCGEventFlagMaskCommand | kCGEventFlagMaskControl |
                 kCGEventFlagMaskAlternate | kCGEventFlagMaskShift)) == 0) {
     query_space_keyup_pending = YES;
-    if (!(query_text.length == 8 && IsASCIIDigitString(query_text)) &&
+    if (!QueryEnglishEntry(query_text) &&
+        !(query_text.length == 8 && IsASCIIDigitString(query_text)) &&
         !query_phone_prefix_active &&
         UtilityPayload(query_text, @"phone") == nil) {
       dispatch_async(dispatch_get_main_queue(), ^{
@@ -5200,6 +5227,8 @@ static CGEventRef QueryEventTap(CGEventTapProxy proxy, CGEventType type,
   }
   if (!query_active) return event;
   BOOL keywordInput = IsKeywordInputMode();
+  BOOL englishInput = QueryEnglishText(query_text) != nil;
+  BOOL englishSpace = character == ' ' && QueryEnglishEntry(query_text);
   BOOL autorepeat = CGEventGetIntegerValueField(event,
       kCGKeyboardEventAutorepeat) != 0;
   BOOL plainDigit = character >= '0' && character <= '9' &&
@@ -5215,13 +5244,15 @@ static CGEventRef QueryEventTap(CGEventTapProxy proxy, CGEventType type,
       IsASCIIDigitString(query_text);
   BOOL phoneSeparatorSpace = character == ' ' &&
       (query_phone_prefix_active || UtilityPayload(query_text, @"phone") != nil);
-  if ((character >= 'a' && character <= 'z') ||
+  if ((englishInput && character >= 0x20 && character != 0x7f) || englishSpace ||
+      (character >= 'a' && character <= 'z') ||
       (keywordInput && ((character >= 0x21 && character <= 0x7e) ||
                         character == 0x00b0)) || plainDigit ||
       punctuation || dateSeparatorSpace || phoneSeparatorSpace) {
     if (plainDigit && keycode < 64)
       query_number_keyup_pending |= UINT64_C(1) << keycode;
-    if (dateSeparatorSpace || phoneSeparatorSpace) query_space_keyup_pending = YES;
+    if (dateSeparatorSpace || phoneSeparatorSpace || englishSpace)
+      query_space_keyup_pending = YES;
     dispatch_async(dispatch_get_main_queue(), ^{
       if (HandleQueryRepeatAction(character, autorepeat)) return;
       query_search_feedback = nil;
@@ -5231,6 +5262,10 @@ static CGEventRef QueryEventTap(CGEventTapProxy proxy, CGEventType type,
       query_utility_highlighted = 0;
       query_last_key_time = CFAbsoluteTimeGetCurrent();
       AdvanceQueryGeneration();
+      if (QueryEnglishText(query_text) != nil) {
+        ShowQueryContext();
+        return;
+      }
       NSString *feedback = ConfigureQuerySearchEngine(query_text);
       if (feedback) {
         query_text = [NSMutableString string];

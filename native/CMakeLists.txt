@@ -6,6 +6,12 @@ option(BUILD_PUBLIC_PROVIDERS_ONLY
   "Build only the standalone public provider library and its source-level tests"
   OFF)
 
+include(CTest)
+if(BUILD_TESTING)
+  set(SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  include(tests/query_features.cmake)
+endif()
+
 if(BUILD_PUBLIC_PROVIDERS_ONLY)
   add_library(squirrel_public_translation_providers SHARED
     src/public_translation_providers.cc
@@ -28,8 +34,9 @@ if(BUILD_PUBLIC_PROVIDERS_ONLY)
     add_executable(query_keyword_test tests/query_keyword_test.cc
       src/query_translation_service.cc)
     target_compile_features(query_keyword_test PRIVATE cxx_std_17)
+    target_compile_options(query_keyword_test PRIVATE -UNDEBUG)
     target_link_libraries(query_keyword_test PRIVATE
-      squirrel_public_translation_providers)
+      squirrel_public_translation_providers "-framework CoreFoundation")
     add_test(NAME query_keyword_translation COMMAND query_keyword_test)
   endif()
   return()

@@ -1,6 +1,7 @@
 #include "query_translation_service.h"
 
 #include "public_translation_providers.h"
+#include "mandarin_pinyin.h"
 
 #include <algorithm>
 #include <atomic>
@@ -23,7 +24,7 @@ namespace {
 constexpr size_t kCacheLimit = 400;
 constexpr size_t kQueueLimit = 32;
 constexpr size_t kWorkerCount = 2;
-constexpr auto kQueryDebounce = std::chrono::milliseconds(300);
+constexpr auto kQueryDebounce = std::chrono::milliseconds(1000);
 constexpr auto kFailureCacheLifetime = std::chrono::seconds(5);
 
 struct ProviderSettings {
@@ -257,7 +258,8 @@ class QueryTranslationService {
       if (!translation.empty()) {
         const std::string phonetic = job.target == "en" ?
             squirrel_translate_public::FetchMacDictionaryPhonetic(translation) :
-            std::string();
+            (job.target == "zh-CN" || job.target == "zh-TW") ?
+                MandarinPinyin(translation) : std::string();
         return {translation, phonetic};
       }
     }
@@ -273,7 +275,8 @@ class QueryTranslationService {
       if (!translation.empty()) {
         const std::string phonetic = job.target == "en" ?
             squirrel_translate_public::FetchMacDictionaryPhonetic(translation) :
-            std::string();
+            (job.target == "zh-CN" || job.target == "zh-TW") ?
+                MandarinPinyin(translation) : std::string();
         return {translation, phonetic};
       }
     }

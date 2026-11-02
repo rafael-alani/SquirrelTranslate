@@ -1,0 +1,10 @@
+add_executable(query-budget-checks "${CMAKE_CURRENT_LIST_DIR}/query_budget_test.cc"
+  "${SOURCE_DIR}/query_translation_service.cc")
+target_compile_features(query-budget-checks PRIVATE cxx_std_17)
+target_compile_options(query-budget-checks PRIVATE -UNDEBUG)
+target_link_libraries(query-budget-checks PRIVATE "-framework CoreFoundation")
+add_test(NAME query_budget_and_pinyin COMMAND query-budget-checks)
+add_executable(query-english-checks "${CMAKE_CURRENT_LIST_DIR}/query_english_test.m")
+target_compile_options(query-english-checks PRIVATE -fobjc-arc -UNDEBUG)
+target_link_libraries(query-english-checks PRIVATE "-framework Foundation")
+add_test(NAME query_english_input COMMAND query-english-checks)

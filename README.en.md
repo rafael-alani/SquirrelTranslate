@@ -1,5 +1,19 @@
 # SquirrelTranslate
 
+> Personal fork: this branch adds a **1-second typing delay**, requests only the
+> highlighted candidate, and supports **`uen ` + English text → Simplified Chinese
+> with tone-marked pinyin**. English spaces, capitalization, punctuation and paste
+> remain literal; `⌘C` copies the result including pinyin. Pinyin uses the local
+> macOS Mandarin transform; polyphonic words may have imperfect readings.
+> Translation results are cached in memory (up to 400) until Squirrel restarts.
+> Closing/editing/navigating cancels pending work; a request already received by
+> a provider can still be billed. API requests use your enabled providers.
+> With DeepL, Chinese output explicitly uses `source_lang=EN`, `target_lang=ZH-HANS`.
+> The SquirrelVoice installer and previous local fixes remain in
+> [squirrel-voice](https://github.com/rafael-alani/squirrel-voice/tree/codex/squirreltranslate-integration).
+> Use its build/install instructions for that combined installation.
+
+
 A translation and quick-lookup panel for Squirrel (Rime) on macOS. It provides candidate translations, IP and phone-region lookup, date/time and unit conversion, and color tools.
 
 Languages: [简体中文](./README.md) · [繁體中文](./README.zh-Hant.md) · [English](./README.en.md) · [한국어](./README.ko.md) · [日本語](./README.ja.md)
