@@ -1,6 +1,11 @@
 # SquirrelTranslate
 
-> Personal fork: this branch adds a **1-second typing delay**, requests only the
+> Personal fork: **`u分课` → 分课 · fēn kè · English translation**. Enter or paste
+> Chinese words or sentences after `u`; spaces and punctuation stay literal.
+> Chinese bypasses the pinyin engine, and source pinyin is generated locally,
+> immediately, with no extra API request. The explicit `uen ` command takes
+> precedence for mixed English/Chinese input.
+> This branch also adds a **1-second typing delay**, requests only the
 > highlighted candidate, and supports **`uen ` + English text → Simplified Chinese
 > with tone-marked pinyin**. English spaces, capitalization, punctuation and paste
 > remain literal; `⌘C` copies the result including pinyin. Pinyin uses the local
@@ -54,7 +59,7 @@ Chinese candidates translate to English and English candidates to Chinese; phone
 
 ## `u` lookup panel
 
-With the Squirrel Simplified Chinese input source active and focus outside an editable field, type lowercase `u` to open the panel, then enter Pinyin or a tool command. Keys pass through unchanged inside editable fields. The input line shows the complete prefix (`uni hao`, `uconv5`); the prefix marks the mode and is excluded from Pinyin, searches, and copied content. Results use a Rime session. About 300 ms after typing stops, candidate translation and phonetics are queried. Translation priority is the macOS Dictionary first, followed by enabled online providers in configured order; the first successful result is used.
+With the Squirrel Simplified Chinese input source active and focus outside an editable field, type lowercase `u` to open the panel, then enter Pinyin, paste Chinese, enter `en ` followed by English, or use a tool command. Keys pass through unchanged inside editable fields. The input line shows the complete prefix (`uni hao`, `uconv5`); the prefix marks the mode and is excluded from Pinyin, searches, and copied content. Pinyin uses a Rime session; literal Chinese and `uen ` English bypass it. After one second without typing or changing selection, only the highlighted result is translated. For direct Chinese, the panel keeps the original text and shows local tone-marked source pinyin while the English translation loads. Chinese sentences wrap in the panel. Translation priority is the macOS Dictionary first, followed by enabled online providers in configured order; the first successful result is used.
 
 ### Panel controls
 
@@ -64,7 +69,7 @@ With the Squirrel Simplified Chinese input source active and focus outside an ed
 | `←` / `→`, `PageUp` / `PageDown` | Change page |
 | Active schema paging keys | Recognized `key_binder/bindings` are honored; `-` and `=` are not used for panel paging |
 | `⌘C` | Copy result information for the selected row |
-| Space | Copy the selected candidate; in color mode, confirm or resume sampling |
+| Space | Insert a literal space in direct Chinese or `uen ` English; otherwise copy the candidate (or confirm/resume color sampling) |
 | `⌘V` | Append clipboard text to the query |
 | `⌘,` or lower-right `ⓘ` | Toggle help; use arrows to page/select within help |
 | `Esc` | Close help; in color mode close the magnifier first, then the panel |
@@ -92,6 +97,8 @@ All commands begin with `u`. Type parameters directly after the keyword, without
 
 | Example | Function and result |
 | --- | --- |
+| `u分课` / `u你好，世界！` | Original Chinese, local tone-marked source pinyin, and English translation |
+| `uen Hello` | English → Simplified Chinese with local pinyin of the result |
 | `unihao` | Show Chinese candidates, translations, and phonetics using the query session's default Rime schema |
 | `ucolor`, `uyanse` | Open the system color magnifier and results panel. Arrow keys move the sample point by one physical pixel; Space or click confirms the color and closes the magnifier. Space can resume sampling. No Screen Recording permission is used; macOS controls magnifier zoom. |
 | `ucolorRRGGBB`, `ucolor#RRGGBB` | Convert to HEX (with/without `#`), HEX with alpha, RGB(A), HSL(A), HSV(A); also accepts `rgb(255,0,0)` and `rgba(255,0,0,0.5)`. Arrows select a format; `⌘C` copies its value. |

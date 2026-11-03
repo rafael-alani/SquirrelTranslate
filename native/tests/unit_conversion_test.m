@@ -5,6 +5,7 @@
 #import <CoreText/CoreText.h>
 #include <rime_api_stdbool.h>
 #include <rime_api.h>
+#import "../src/query_chinese_input.h"
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
@@ -300,7 +301,7 @@ static void TestPanelWrapping(void) {
   CGFloat column = QueryCommentColumn(width,
       [longLabel sizeWithAttributes:@{NSFontAttributeName:font}].width, gap, YES, 40);
   NSArray<NSNumber *> *heights = QueryMeasuredRowHeights(candidates, comments,
-      font, font, width, column, 40, 900);
+      font, font, width, column, 40, 900, NO);
   CGFloat commentWidth = width - column - 8;
   assert(QueryWrappedLineCount(longResult, font, commentWidth) > 1);
   CGFloat lineHeight = FontLineHeight(font);
@@ -313,16 +314,19 @@ static void TestPanelWrapping(void) {
   // Candidate length never adds lines, even with explicit line breaks.
   NSArray *singleLineHeights = QueryMeasuredRowHeights(
       @[longLabel, @"很长的候选词标签\n仍然只能显示一行", @"短"],
-      @[@"", @"OK", @"OK"], font, font, width, column, 40, 900);
+      @[@"", @"OK", @"OK"], font, font, width, column, 40, 900, NO);
   for (NSNumber *height in singleLineHeights) assert(height.doubleValue == base);
   NSArray *shortLabelHeights = QueryMeasuredRowHeights(@[@"甲", @"乙", @"丙"],
-      comments, font, font, width, column, 40, 900);
+      comments, font, font, width, column, 40, 900, NO);
   assert([heights isEqualToArray:shortLabelHeights]);
   NSArray *limited = QueryMeasuredRowHeights(candidates, comments, font, font,
-      width, column, 40, base * 3 + lineHeight);
+      width, column, 40, base * 3 + lineHeight, NO);
   CGFloat used = 0;
   for (NSNumber *height in limited) used += height.doubleValue;
   assert(limited.count == candidates.count && used <= base * 3 + lineHeight);
+  NSArray<NSNumber *> *chineseHeights = QueryMeasuredRowHeights(@[longResult], @[@"pinyin"],
+      font, font, width, column, 0, 900, YES);
+  assert(chineseHeights[0].doubleValue > base);
   assert(QueryWrappedLineCount(@"第一行\n第二行", font, 200) == 2);
   assert(QueryWrappedLineCount(@"", font, 100) == 1);
 
@@ -354,12 +358,54 @@ static void TestPanelWrapping(void) {
   assert(png.length && [png writeToFile:@"query-panel-layout-preview.png" atomically:YES]);
 }
 
+static void TestChinesePanel(void) {
+  NSFont *font = [NSFont systemFontOfSize:16];
+  NSUInteger sample = 0;
+  for (NSString *source in @[@"分课", @"你好， 世界！我正在学习中文，今天开始分课。"] ) {
+    NSMutableArray *candidates = [NSMutableArray array], *comments = [NSMutableArray array];
+    QueryLiteralRows(source, candidates, comments);
+    comments[0] = [comments[0] stringByAppendingString:@"\nExample English translation."];
+    CGFloat width = 400;
+    CGFloat column = QueryCommentColumn(width,
+        [source sizeWithAttributes:@{NSFontAttributeName:font}].width,
+        QueryCandidateCommentTabWidth(font), YES, 0);
+    column = MIN(column, width * 0.45);
+    NSArray<NSNumber *> *heights = QueryMeasuredRowHeights(candidates, comments,
+        font, font, width, column, 0, 900, YES);
+    CGFloat total = QueryPanelVerticalPadding() * 2 + FontLineHeight(font) +
+        QueryPreeditPadding() * 2 + heights[0].doubleValue;
+    STQueryBridgeViewV4 *view = [[STQueryBridgeViewV4 alloc] initWithFrame:NSMakeRect(0, 0, width, total)];
+    view.candidateFont = view.commentFont = view.preeditFont = font;
+    view.labelFont = [NSFont systemFontOfSize:12];
+    view.input = [@"u" stringByAppendingString:source];
+    view.candidates = candidates;
+    view.comments = comments;
+    view.rowHeights = heights;
+    view.commentColumnX = column;
+    view.wrapCandidates = YES;
+    view.helpIconRect = NSMakeRect(width - 36, QueryPanelVerticalPadding() +
+        (heights[0].doubleValue - 28) / 2, 28, 28);
+    NSBitmapImageRep *image = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL
+        pixelsWide:(NSInteger)width pixelsHigh:(NSInteger)ceil(total) bitsPerSample:8
+        samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace
+        bytesPerRow:0 bitsPerPixel:0];
+    [NSGraphicsContext saveGraphicsState];
+    NSGraphicsContext.currentContext = [NSGraphicsContext graphicsContextWithBitmapImageRep:image];
+    [view drawRect:view.bounds];
+    [NSGraphicsContext restoreGraphicsState];
+    NSData *png = [image representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+    NSString *path = [NSString stringWithFormat:@"query-chinese-%lu.png", (unsigned long)sample++];
+    assert(png.length && [png writeToFile:path atomically:YES]);
+  }
+}
+
 int main(void) {
   @autoreleasepool {
     TestPhoneFormats();
     TestSchemaPaging();
     TestPagination();
     TestPanelWrapping();
+    TestChinesePanel();
     NSArray *rows = RowsForUnitInput(@"1000pa");
     assert(rows.count == 9);
     ExpectValue(rows, @"帕 (Pa)", 1000);

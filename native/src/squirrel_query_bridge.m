@@ -7,7 +7,7 @@
 #include <rime_api_stdbool.h>
 #include <rime_api.h>
 #include "query_translation_service.h"
-#include "query_english_input.h"
+#include "query_chinese_input.h"
 
 #include <dispatch/dispatch.h>
 #include <arpa/inet.h>
@@ -132,10 +132,10 @@ static NSString *QueryTranslationKey(NSString *target, NSString *word) {
 
 static NSString *QueryTargetForCandidate(NSString *candidate) {
   if (QueryEnglishText(query_text) != nil) return @"zh-CN";
+  if (QueryContainsChinese(candidate)) return @"en";
   static NSCharacterSet *asciiLetters;
   static NSCharacterSet *englishCharacters;
   static NSCharacterSet *nonEnglishCharacters;
-  static NSCharacterSet *cjkCharacters;
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
     asciiLetters = [NSCharacterSet characterSetWithCharactersInString:
@@ -143,16 +143,13 @@ static NSString *QueryTargetForCandidate(NSString *candidate) {
     englishCharacters = [NSCharacterSet characterSetWithCharactersInString:
         @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 '-."];
     nonEnglishCharacters = [englishCharacters invertedSet];
-    cjkCharacters = [NSCharacterSet characterSetWithRange:
-        NSMakeRange(0x4E00, 0xA000 - 0x4E00)];
   });
   BOOL hasASCII = [candidate rangeOfCharacterFromSet:asciiLetters].location !=
       NSNotFound;
   if (hasASCII && [candidate rangeOfCharacterFromSet:nonEnglishCharacters].location ==
                       NSNotFound)
     return @"zh-CN";
-  return [candidate rangeOfCharacterFromSet:cjkCharacters].location != NSNotFound ?
-      @"en" : nil;
+  return nil;
 }
 
 static void QueryTranslationDidFinish(uint64_t generation, const char *word,
@@ -3452,6 +3449,7 @@ static STFocusedElementState FocusedElementState(void) {
 @property(nonatomic, copy) NSString *input;
 @property(nonatomic) NSInteger highlighted;
 @property(nonatomic) CGFloat commentColumnX;
+@property(nonatomic) BOOL wrapCandidates;
 @property(nonatomic, copy) NSArray<NSNumber *> *rowHeights;
 @property(nonatomic) NSRect helpIconRect;
 @property(nonatomic, copy) NSString *helpPageIndicator;
@@ -3639,7 +3637,8 @@ static NSUInteger QueryWrappedLineCount(NSString *text, NSFont *font,
 
 static NSArray<NSNumber *> *QueryMeasuredRowHeights(NSArray<NSString *> *candidates,
     NSArray<NSString *> *comments, NSFont *candidateFont, NSFont *commentFont,
-    CGFloat width, CGFloat commentColumnX, CGFloat indicatorWidth, CGFloat availableHeight) {
+    CGFloat width, CGFloat commentColumnX, CGFloat indicatorWidth, CGFloat availableHeight,
+    BOOL wrapCandidates) {
   CGFloat candidateLineHeight = FontLineHeight(candidateFont);
   CGFloat commentLineHeight = FontLineHeight(commentFont);
   CGFloat step = MAX(candidateLineHeight, commentLineHeight);
@@ -3650,7 +3649,11 @@ static NSArray<NSNumber *> *QueryMeasuredRowHeights(NSArray<NSString *> *candida
     CGFloat trailing = index + 1 == candidates.count ? 40 + indicatorWidth : 8;
     NSString *comment = index < comments.count ? comments[index] : @"";
     NSUInteger commentLines = QueryWrappedLineCount(comment, commentFont, width - commentColumnX - trailing);
-    [naturalHeights addObject:@(MAX(candidateLineHeight,
+    CGFloat candidateWidth = commentColumnX - QueryPanelHorizontalPadding() - 27 -
+        QueryCandidateCommentTabWidth(candidateFont);
+    NSUInteger candidateLines = wrapCandidates ?
+        QueryWrappedLineCount(candidates[index], candidateFont, candidateWidth) : 1;
+    [naturalHeights addObject:@(MAX(candidateLines * candidateLineHeight,
         commentLines * commentLineHeight) + QueryCandidateRowPadding())];
     [heights addObject:@(baseHeight)];
   }
@@ -3804,7 +3807,12 @@ static void DrawQueryTextWrapped(NSString *text, NSFont *font, NSColor *color,
     CGFloat candidateX = row.origin.x + 27;
     CGFloat candidateWidth = MAX(0, self.commentColumnX - candidateX -
         QueryCandidateCommentTabWidth(candidateFont));
-    if (candidateWidth > 0)
+    if (candidateWidth > 0 && self.wrapCandidates) {
+      NSUInteger maxLines = MAX(1, (NSUInteger)floor(
+          (rowHeight - QueryCandidateRowPadding()) / FontLineHeight(candidateFont)));
+      DrawQueryTextWrapped(candidate, candidateFont, NSColor.labelColor,
+          row, candidateX, candidateWidth, maxLines);
+    } else if (candidateWidth > 0)
       DrawQueryTextCentered(candidate,
           QueryCandidateFontForWidth(candidate, candidateFont, candidateWidth),
           NSColor.labelColor, row, candidateX, NO);
@@ -3949,7 +3957,7 @@ static BOOL HandleQueryRepeatAction(unichar character, BOOL autorepeat) {
   if (autorepeat || (character != 'g' && character != 'b' &&
                      character != 'c' && character != 'p' &&
                      character != 'n') ||
-      QueryEnglishEntry(query_text) || IsKeywordInputMode() ||
+      QueryLiteralEntry(query_text) || IsKeywordInputMode() ||
       query_help_visible || query_search_feedback ||
       !query_panel.visible) {
     ResetQueryRepeatAction();
@@ -4112,6 +4120,7 @@ static NSArray<NSArray<NSString *> *> *QueryHelpEntries(void) {
   NSString *newsActionHelp = @"公开版不执行动作（触发按键会被吞掉）";
 #endif
   NSArray<NSArray<NSString *> *> *entries = @[
+    @[@"u分课", @"Chinese → local pinyin + English (1 second pause)"],
     @[@"uen Hello", @"English → 中文 + pinyin (1 second pause)"],
     @[@"⌃T", @"开启或关闭候选翻译"],
     @[@"⌃P", @"朗读当前候选的译文"],
@@ -4308,9 +4317,10 @@ static void ShowQueryContext(void) {
     query_color_sample = nil;
     query_color_sampler_started = NO;
   }
+  NSString *literal = QueryLiteralText(query_text);
   RimeContext_stdbool context = {0};
   RIME_STRUCT_INIT(RimeContext_stdbool, context);
-  if (!query_api->get_context(query_session, &context)) return;
+  if (literal == nil && !query_api->get_context(query_session, &context)) return;
 
   NSMutableArray<NSString *> *candidates = [NSMutableArray array];
   NSMutableArray<NSString *> *comments = [NSMutableArray array];
@@ -4326,15 +4336,12 @@ static void ShowQueryContext(void) {
   }
   NSInteger highlighted = context.menu.highlighted_candidate_index;
   STQueryBridgeViewV4 *view = QueryView();
-  query_api->free_context(&context);
+  if (literal == nil) query_api->free_context(&context);
 
-  NSString *english = QueryEnglishText(query_text);
-  BOOL utilityMode = english == nil && QueryUtilityMode(candidates, comments, &input);
-  if (english != nil) {
-    [candidates removeAllObjects];
-    [comments removeAllObjects];
-    [candidates addObject:english.length ? english : @"English → 中文"];
-    [comments addObject:english.length ? @"" : @"Type English after uen "];
+  NSString *chinese = QueryChineseText(query_text);
+  BOOL utilityMode = literal == nil && QueryUtilityMode(candidates, comments, &input);
+  if (literal != nil) {
+    QueryLiteralRows(query_text, candidates, comments);
     input = [@"u" stringByAppendingString:query_text];
     highlighted = 0;
   } else if (utilityMode) {
@@ -4358,7 +4365,7 @@ static void ShowQueryContext(void) {
     highlighted = 0;
   }
   if (!query_help_visible && !query_search_feedback &&
-      (english == nil ? query_text.length > 0 : english.length > 0)) {
+      (literal == nil ? query_text.length > 0 : literal.length > 0)) {
     // Utility result rows keep their values untouched. Translate only the
     // final keyword row through the dedicated local keyword path.
     NSUInteger firstTranslationIndex = utilityMode ?
@@ -4376,7 +4383,9 @@ static void ShowQueryContext(void) {
           [comments[index] rangeOfString:@"\t"].location != NSNotFound;
       if (translation.length) {
         if (!hasTranslation) {
-          comments[index] = utilityMode ? translation :
+          comments[index] = chinese ?
+              [comments[index] stringByAppendingFormat:@"\n%@", translation] :
+              utilityMode ? translation :
               [comments[index] stringByAppendingFormat:@"\t%@", translation];
         }
         continue;
@@ -4413,8 +4422,10 @@ static void ShowQueryContext(void) {
     [comments addObject:@""];
   }
   for (NSUInteger index = 0; index < candidates.count; ++index) {
-    candidates[index] = LocalizedQueryText(candidates[index]);
-    comments[index] = LocalizedQueryText(comments[index]);
+    if (literal == nil || query_help_visible || query_search_feedback) {
+      candidates[index] = LocalizedQueryText(candidates[index]);
+      comments[index] = LocalizedQueryText(comments[index]);
+    }
   }
   BOOL changed = ![view.input isEqualToString:input] ||
       ![view.candidates isEqualToArray:candidates] ||
@@ -4427,6 +4438,7 @@ static void ShowQueryContext(void) {
   view.input = input;
   view.highlighted = highlighted;
   view.helpPageIndicator = helpPageIndicator;
+  view.wrapCandidates = chinese != nil && !query_help_visible && !query_search_feedback;
   CGFloat rowHeight = MAX(FontLineHeight(view.candidateFont),
                          FontLineHeight(view.commentFont)) +
       QueryCandidateRowPadding();
@@ -4472,13 +4484,14 @@ static void ShowQueryContext(void) {
   CGFloat width = QueryPanelWidth(desiredWidth, maxWidth);
   CGFloat commentColumnX = QueryCommentColumn(width, widestCandidate,
       QueryCandidateCommentTabWidth(view.candidateFont), widestComment > 0, indicatorWidth);
+  if (view.wrapCandidates) commentColumnX = MIN(commentColumnX, width * 0.45);
   view.commentColumnX = MAX(horizontalPadding + 27, commentColumnX);
   CGFloat availablePanelHeight = visible.size.height - 24;
   CGFloat availableRowsHeight = availablePanelHeight -
       QueryPanelVerticalPadding() * 2 - inputHeight;
   NSArray<NSNumber *> *rowHeights = QueryMeasuredRowHeights(candidates, comments,
       view.candidateFont, view.commentFont, width, view.commentColumnX,
-      indicatorWidth, availableRowsHeight);
+      indicatorWidth, availableRowsHeight, view.wrapCandidates);
   CGFloat totalRowsHeight = 0;
   for (NSNumber *measuredHeight in rowHeights) totalRowsHeight += measuredHeight.doubleValue;
   view.rowHeights = rowHeights;
@@ -4520,7 +4533,7 @@ static void ShowQueryContext(void) {
 
 static BOOL ProcessQueryKey(int keycode) {
   if (!query_api || !query_session) return NO;
-  if (QueryEnglishText(query_text) != nil) return YES;
+  if (QueryLiteralText(query_text) != nil) return YES;
   if (query_active) AdvanceQueryGeneration();
   BOOL handled = query_api->process_key(query_session, keycode, 0);
   ShowQueryContext();
@@ -4552,7 +4565,7 @@ static BOOL EnsureQuerySession(void) {
 }
 
 static BOOL SetQueryInput(NSString *input) {
-  if (QueryEnglishText(input) != nil) return YES;
+  if (QueryLiteralText(input) != nil) return YES;
   return query_api && RIME_PROVIDED(query_api, set_input) && query_session &&
       query_api->set_input(query_session, input.UTF8String);
 }
@@ -4569,7 +4582,7 @@ static BOOL FeedQueryInputByKeys(RimeSessionId session, NSString *input) {
 
 static BOOL RebuildQuerySession(void) {
   if (!query_api || !query_active) return NO;
-  if (QueryEnglishText(query_text) != nil) {
+  if (QueryLiteralText(query_text) != nil) {
     ShowQueryContext();
     return YES;
   }
@@ -4714,15 +4727,7 @@ static void PasteQueryText(void) {
   NSString *pasted = [NSPasteboard.generalPasteboard
       stringForType:NSPasteboardTypeString];
   if (!pasted.length) return;
-  NSMutableString *normalized = [NSMutableString string];
-  for (NSUInteger index = 0; index < pasted.length; ++index) {
-    unichar character = [pasted characterAtIndex:index];
-    if (character == '\r' || character == '\n' || character == '\t')
-      character = ' ';
-    if ([[NSCharacterSet controlCharacterSet] characterIsMember:character])
-      continue;
-    [normalized appendFormat:@"%C", character];
-  }
+  NSString *normalized = QueryNormalizedPaste(pasted);
   if (!normalized.length) return;
   ResetQueryRepeatAction();
   query_search_feedback = nil;
@@ -5048,7 +5053,7 @@ static CGEventRef QueryEventTap(CGEventTapProxy proxy, CGEventType type,
     });
     return NULL;
   }
-  NSInteger configuredPage = query_active && !QueryEnglishEntry(query_text) ?
+  NSInteger configuredPage = query_active && !QueryLiteralEntry(query_text) ?
       QueryPagingDirectionForEvent(event, keycode, flags) : 0;
   if (configuredPage) {
     if (!query_paging_keyup_pending) query_paging_keyup_pending = [NSMutableIndexSet indexSet];
@@ -5100,7 +5105,7 @@ static CGEventRef QueryEventTap(CGEventTapProxy proxy, CGEventType type,
       (flags & (kCGEventFlagMaskCommand | kCGEventFlagMaskControl |
                 kCGEventFlagMaskAlternate | kCGEventFlagMaskShift)) == 0) {
     query_space_keyup_pending = YES;
-    if (!QueryEnglishEntry(query_text) &&
+    if (!QueryLiteralEntry(query_text) &&
         !(query_text.length == 8 && IsASCIIDigitString(query_text)) &&
         !query_phone_prefix_active &&
         UtilityPayload(query_text, @"phone") == nil) {
@@ -5192,9 +5197,9 @@ static CGEventRef QueryEventTap(CGEventTapProxy proxy, CGEventType type,
       return NULL;
     }
   }
-  UniChar characters[4] = {0};
+  UniChar characters[256] = {0};
   UniCharCount length = 0;
-  CGEventKeyboardGetUnicodeString(event, 4, &length, characters);
+  CGEventKeyboardGetUnicodeString(event, 256, &length, characters);
   if (!length) return event;
 
   unichar character = characters[0];
@@ -5227,8 +5232,9 @@ static CGEventRef QueryEventTap(CGEventTapProxy proxy, CGEventType type,
   }
   if (!query_active) return event;
   BOOL keywordInput = IsKeywordInputMode();
-  BOOL englishInput = QueryEnglishText(query_text) != nil;
-  BOOL englishSpace = character == ' ' && QueryEnglishEntry(query_text);
+  NSString *eventText = [NSString stringWithCharacters:characters length:length];
+  BOOL literalInput = QueryLiteralText(query_text) != nil || QueryContainsChinese(eventText);
+  BOOL literalSpace = character == ' ' && QueryLiteralEntry(query_text);
   BOOL autorepeat = CGEventGetIntegerValueField(event,
       kCGKeyboardEventAutorepeat) != 0;
   BOOL plainDigit = character >= '0' && character <= '9' &&
@@ -5244,25 +5250,26 @@ static CGEventRef QueryEventTap(CGEventTapProxy proxy, CGEventType type,
       IsASCIIDigitString(query_text);
   BOOL phoneSeparatorSpace = character == ' ' &&
       (query_phone_prefix_active || UtilityPayload(query_text, @"phone") != nil);
-  if ((englishInput && character >= 0x20 && character != 0x7f) || englishSpace ||
+  if ((literalInput && character >= 0x20 && character != 0x7f) || literalSpace ||
       (character >= 'a' && character <= 'z') ||
       (keywordInput && ((character >= 0x21 && character <= 0x7e) ||
                         character == 0x00b0)) || plainDigit ||
       punctuation || dateSeparatorSpace || phoneSeparatorSpace) {
     if (plainDigit && keycode < 64)
       query_number_keyup_pending |= UINT64_C(1) << keycode;
-    if (dateSeparatorSpace || phoneSeparatorSpace || englishSpace)
+    if (dateSeparatorSpace || phoneSeparatorSpace || literalSpace)
       query_space_keyup_pending = YES;
     dispatch_async(dispatch_get_main_queue(), ^{
       if (HandleQueryRepeatAction(character, autorepeat)) return;
       query_search_feedback = nil;
       query_search_feedback_title = nil;
-      [query_text appendFormat:@"%C", character];
+      [query_text appendString:literalInput ? eventText :
+          [NSString stringWithFormat:@"%C", character]];
       query_phone_prefix_active = IsDirectPhoneQueryText(query_text);
       query_utility_highlighted = 0;
       query_last_key_time = CFAbsoluteTimeGetCurrent();
       AdvanceQueryGeneration();
-      if (QueryEnglishText(query_text) != nil) {
+      if (QueryLiteralText(query_text) != nil) {
         ShowQueryContext();
         return;
       }

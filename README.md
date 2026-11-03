@@ -1,6 +1,11 @@
 # SquirrelTranslate
 
-> Personal fork: this branch adds a **1-second typing delay**, requests only the
+> Personal fork: **`u分课` → 分课 · fēn kè · English translation**. Enter or paste
+> Chinese words or sentences after `u`; spaces and punctuation stay literal.
+> Chinese bypasses the pinyin engine, and source pinyin is generated locally,
+> immediately, with no extra API request. The explicit `uen ` command takes
+> precedence for mixed English/Chinese input.
+> This branch also adds a **1-second typing delay**, requests only the
 > highlighted candidate, and supports **`uen ` + English text → Simplified Chinese
 > with tone-marked pinyin**. English spaces, capitalization, punctuation and paste
 > remain literal; `⌘C` copies the result including pinyin. Pinyin uses the local
@@ -54,7 +59,7 @@
 
 ## `u` 查询面板
 
-在鼠须管简体输入源下、焦点不在可编辑输入框时，输入小写 `u` 打开查询面板，再输入拼音或工具命令。编辑框内会放行按键，不改变正常输入。输入行会显示完整的 `u` 前缀，如 `uni hao`、`uconv5`；前缀仅是模式标识，不加入拼音、搜索或复制内容。面板使用 Rime 候选；停止输入约 300ms 后异步查询候选翻译和音标。翻译顺序为 macOS 系统词典优先，然后按配置顺序尝试启用的在线提供者，取第一个成功结果。
+在鼠须管简体输入源下、焦点不在可编辑输入框时，输入小写 `u` 打开查询面板，再输入拼音、粘贴中文、输入 `en ` 后接英文，或使用工具命令。编辑框内会放行按键，不改变正常输入。输入行会显示完整的 `u` 前缀，如 `uni hao`、`uconv5`；前缀仅是模式标识，不加入拼音、搜索或复制内容。拼音查询使用 Rime 候选；直接中文和 `uen ` 英文查询绕过拼音引擎。停止输入或切换候选一秒后，仅翻译当前高亮项。直接中文查询立即显示原文的本地带声调拼音，随后显示英文译文；句子会自动换行。翻译顺序为 macOS 系统词典优先，然后按配置顺序尝试启用的在线提供者，取第一个成功结果。
 
 ### 面板通用操作
 
@@ -64,7 +69,7 @@
 | `←` / `→`、`PageUp` / `PageDown` | 翻页 |
 | 当前方案的翻页键 | 沿用可识别的 `key_binder/bindings`；`-` 和 `=` 不用作 U 面板翻页 |
 | `⌘C` | 复制当前高亮项的结果信息 |
-| 空格 | 复制当前候选词；取色模式中用于选色／重新取色 |
+| 空格 | 直接中文及 `uen ` 英文模式中输入空格；其他模式复制当前候选词，取色模式中用于选色／重新取色 |
 | `⌘V` | 将剪贴板文本追加到查询输入 |
 | `⌘,` 或右下角 `ⓘ` | 打开／关闭帮助；帮助中左右翻页、上下选择 |
 | `Esc` | 关闭帮助；取色时先关闭放大镜，放大镜关闭后再关闭面板 |

@@ -17,7 +17,8 @@ static int calls = 0, callbacks = 0;
 static std::string last_word, last_translation, last_phonetic;
 
 namespace squirrel_translate_public {
-std::string Fetch(const std::string&, const Request& request, const ProviderConfig&) {
+std::string Fetch(const std::string& provider, const Request& request, const ProviderConfig&) {
+  assert(provider == "deepl");
   std::lock_guard<std::mutex> lock(mutex);
   ++calls;
   last_word = request.word;
@@ -46,7 +47,8 @@ int main() {
   const auto rime = std::filesystem::path(root) / "Library/Rime";
   std::filesystem::create_directories(rime);
   std::ofstream(rime / "translation.providers.yaml") <<
-      "providers:\n  mac_dictionary:\n    enabled: true\n";
+      "provider_order:\n  - deepl\nproviders:\n  mac_dictionary:\n    enabled: false\n"
+      "  deepl:\n    enabled: true\n";
 
   assert(MandarinPinyin("学习") == "xué xí");
   assert(MandarinPinyin("你好，世界！").find("nǐ hǎo") == 0);
@@ -81,12 +83,41 @@ int main() {
     assert(calls == 2 && last_translation == "study" && last_phonetic.empty());
   }
   SquirrelQueryTranslationSetGeneration(5);
-  Request("closed before the delay", 5);
+  Request("分课", 5, "en");
+  std::this_thread::sleep_for(450ms);
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    assert(calls == 2); // Direct Chinese has the same typing delay.
+  }
   SquirrelQueryTranslationSetGeneration(6);
+  Request("你好， 世界！", 6, "en");
+  {
+    std::unique_lock<std::mutex> lock(mutex);
+    assert(ready.wait_for(lock, 3s, [] { return callbacks == 4; }));
+    assert(calls == 3 && last_word == "你好， 世界！"); // Exact source reaches DeepL.
+  }
+  SquirrelQueryTranslationSetGeneration(7);
+  Request("分课", 7, "en");
+  {
+    std::unique_lock<std::mutex> lock(mutex);
+    assert(ready.wait_for(lock, 3s, [] { return callbacks == 5; }));
+    assert(calls == 4 && last_word == "分课" && last_translation == "study");
+    // The panel must transliterate the source, never the English translation.
+    assert(MandarinPinyin(last_word) == "fēn kè");
+  }
+  SquirrelQueryTranslationSetGeneration(8);
+  Request("分课", 8, "en"); // Also reusable when selected through ordinary pinyin.
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    assert(calls == 4 && callbacks == 6);
+  }
+  SquirrelQueryTranslationSetGeneration(9);
+  Request("closed before the delay", 9);
+  SquirrelQueryTranslationSetGeneration(10);
   std::this_thread::sleep_for(1100ms);
   {
     std::lock_guard<std::mutex> lock(mutex);
-    assert(calls == 2 && callbacks == 3);
+    assert(calls == 4 && callbacks == 6);
   }
   SquirrelQueryTranslationShutdown();
   std::filesystem::remove_all(root);

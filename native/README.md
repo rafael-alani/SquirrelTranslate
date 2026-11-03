@@ -2,6 +2,8 @@
 
 `src/squirrel_query_bridge.m` 与 `src/query_translation_service.cc` 实现 Squirrel 进程内 `u` 查询面板。桥接层复用已初始化的 Rime 引擎和独立 Rime 会话，自绘不激活的候选面板；翻译服务链接公开的 [`public_translation_providers.cc`](src/public_translation_providers.cc)。
 
+本分支支持 `u分课`：直接显示中文原文、原文的本地带声调拼音 `fēn kè`，及配置提供者的英文译文。词语、句子、空格及中文标点均不进入拼音引擎。`u` + 拼音和 `uen ` + 英文保持可用；在线翻译仍等待一秒并复用缓存。拼音通过 macOS 本地转换生成，无额外 API 请求。
+
 ## 公开发布文件
 
 - 面板、快捷键、颜色／IP／手机号工具：`src/squirrel_query_bridge.m`。
